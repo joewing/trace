@@ -1,0 +1,37 @@
+<?xml version="1.0"?> <!-- -*- sgml -*- -->
+<!DOCTYPE chapter PUBLIC "-//OASIS//DTD DocBook XML V4.2//EN"
+  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+
+<chapter id="trace-manual" xreflabel="Trace">
+
+<title>Trace: a memory access trace collector</title>
+
+<para>To use this tool, you must specify
+<option>--tool=trace</option> on the Valgrind
+command line.</para>
+
+
+<sect1 id="trace-manual.overview" xreflabel="Overview">
+<title>Overview</title>
+
+<para>Trace is a Valgrind tool to gather memory access traces.
+It is derived from the Lackey tool.
+</para>
+
+</sect1>
+
+
+<sect1 id="trace-manual.options" xreflabel="Trace Command-line Options">
+<title>Trace Command-line Options</title>
+
+<para>Trace-specific command-line options are:</para>
+
+<!-- start of xi:include in the manpage -->
+<variablelist id="trace.opts.list">
+
+</variablelist>
+<!-- end of xi:include in the manpage -->
+
+</sect1>
+
+</chapter>
