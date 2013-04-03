@@ -116,7 +116,7 @@ static VG_REGPARM(2) void trace_load(Addr addr, SizeT size)
       VG_(printf)("I%x", instr_count);
       instr_count = 0;
    }
-   VG_(printf)("R%08lx:%lx\n", addr, size);
+   VG_(printf)("R%lx:%lx\n", addr, size);
 }
 
 static VG_REGPARM(2) void trace_store(Addr addr, SizeT size)
@@ -125,7 +125,7 @@ static VG_REGPARM(2) void trace_store(Addr addr, SizeT size)
       VG_(printf)("I%x", instr_count);
       instr_count = 0;
    }
-   VG_(printf)("W%08lx:%lx\n", addr, size);
+   VG_(printf)("W%lx:%lx\n", addr, size);
 }
 
 static VG_REGPARM(2) void trace_modify(Addr addr, SizeT size)
@@ -134,7 +134,7 @@ static VG_REGPARM(2) void trace_modify(Addr addr, SizeT size)
       VG_(printf)("I%x", instr_count);
       instr_count = 0;
    }
-   VG_(printf)("M%08lx:%lx\n", addr, size);
+   VG_(printf)("M%lx:%lx\n", addr, size);
 }
 
 
