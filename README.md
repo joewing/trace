@@ -19,3 +19,13 @@ This tool differs from Lackey in that it dumps instruction counts
 and ignores instruction data.  It comes with the same caveats as
 Lackey regarding the quality of the traces.
 
+Currently, there is only a single option:
+
+<pre>
+--all-refs=no|yes
+<pre>
+
+This determines whether all data memory accesses are logged ("yes", the
+default) or if only accesses to data that was explicitly allocated by the
+program ("no").
+
