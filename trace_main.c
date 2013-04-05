@@ -43,19 +43,8 @@
 #include "pub_tool_debuginfo.h"
 #include "pub_tool_libcbase.h"
 #include "pub_tool_options.h"
-#include "pub_tool_machine.h"     // VG_(fnptr_to_fnentry)
-
-static Bool trace_process_cmd_line_option(Char* arg)
-{
-   return False;
-}
-
-static void trace_print_usage(void)
-{  
-   VG_(printf)("\n");
-}
-
-#define MAX_DSIZE    512
+#include "pub_tool_machine.h"
+#include "pub_tool_mallocfree.h"
 
 typedef IRExpr IRAtom;
 
@@ -68,6 +57,13 @@ typedef struct {
    IRAtom*    addr;
    Int        size;
 } Event;
+
+typedef struct AddressRegion {
+   long offset;
+   long start;
+   long size;
+   struct AddressRegion *next;
+} AddressRegion;
 
 /* Up to this many unnotified events are allowed.  Must be at least two,
    so that reads and writes to the same address can be merged into a modify.
@@ -101,9 +97,128 @@ typedef struct {
    instrumentation IR for each event, in the order in which they
    appear.  */
 
+static Bool  clo_all_refs = True;
 static Event events[N_EVENTS];
 static Int   events_used = 0;
 static Int   instr_count = 0;
+
+static AddressRegion *regions = NULL;
+static long watermark = 0;
+
+static void add_region(void *ptr, SizeT size)
+{
+   if(!clo_all_refs) {
+      AddressRegion *rp = VG_(malloc)("add_region", sizeof(AddressRegion));
+      rp->start   = (long)ptr;
+      rp->size    = (long)size;
+      rp->offset  = watermark;
+      rp->next    = regions;
+      regions     = rp;
+      watermark += ((long)size + 7) & ~7;
+   }
+}
+
+static void remove_region(void *ptr)
+{
+   if(!clo_all_refs) {
+      AddressRegion **rp = &regions;
+      const long temp = (long)ptr;
+      while(*rp) {
+         if(temp >= (*rp)->start && temp < ((*rp)->start + (*rp)->size)) {
+            AddressRegion *tp = *rp;
+            *rp = (*rp)->next;
+            VG_(free)(tp);
+            return;
+         }
+         rp = &(*rp)->next;
+      }
+      VG_(printf)("trace: ERROR: region not found\n");
+   }
+}
+
+static long get_offset(Addr ptr)
+{
+   if(clo_all_refs) {
+      return ptr;
+   } else {
+      AddressRegion *rp;
+      for(rp = regions; rp; rp = rp->next) {
+         if(ptr >= rp->start && ptr < rp->start + rp->size) {
+            return ptr - rp->start + rp->offset;
+         }
+      }
+      return -1;
+   }
+}
+
+static void *trace_malloc(ThreadId tid, SizeT n)
+{
+   void *ptr = VG_(malloc)("trace_malloc", n);
+   add_region(ptr, n);
+   return ptr;
+}
+
+static void *trace_builtin_new(ThreadId tid, SizeT n)
+{
+   void *ptr = VG_(malloc)("trace_builtin_new", n);
+   add_region(ptr, n);
+   return ptr;
+}
+
+static void *trace_builtin_vec_new(ThreadId tid, SizeT n)
+{
+   void *ptr = VG_(malloc)("trace_builtin_vec_new", n);
+   add_region(ptr, n);
+   return ptr;
+}
+
+static void *trace_memalign(ThreadId tid, SizeT align, SizeT n)
+{
+   void *ptr;
+   long p = (long)VG_(malloc)("trace_memalign", n + align);
+   p += align - (p % align);
+   ptr = (void*)p;
+   add_region(ptr, n);
+   return ptr;
+}
+
+static void *trace_calloc(ThreadId tid, SizeT nmem, SizeT size1)
+{
+   void *ptr = VG_(calloc)("trace_calloc", nmem, size1);
+   add_region(ptr, size1 * nmem);
+   return ptr;
+}
+
+static void trace_free(ThreadId tid, void *p)
+{
+   remove_region(p);
+   return VG_(free)(p);
+}
+
+static void trace_builtin_delete(ThreadId tid, void *p)
+{
+   remove_region(p);
+   return VG_(free)(p);
+}
+
+static void trace_builtin_vec_delete(ThreadId tid, void *p)
+{
+   remove_region(p);
+   return VG_(free)(p);
+}
+
+static void *trace_realloc(ThreadId tid, void *p, SizeT new_size)
+{
+   remove_region(p);
+   p = VG_(realloc)("trace_realloc", p, new_size);
+   add_region(p, new_size);
+   return p;
+}
+
+static SizeT trace_malloc_usable_size(ThreadId tid, void *p)
+{
+   return VG_(malloc_usable_size)(p);
+}
 
 static VG_REGPARM(2) void trace_instr(Addr addr, SizeT size)
 {
@@ -112,43 +227,52 @@ static VG_REGPARM(2) void trace_instr(Addr addr, SizeT size)
 
 static VG_REGPARM(2) void trace_load(Addr addr, SizeT size)
 {
-   if(instr_count > 0) {
-      VG_(printf)("I%x", instr_count);
-      instr_count = 0;
+   const long offset = get_offset(addr);
+   if(offset != -1) {
+      if(instr_count > 0) {
+         VG_(printf)("I%x", instr_count);
+         instr_count = 0;
+      }
+      VG_(printf)("R%lx:%lx\n", offset, size);
    }
-   VG_(printf)("R%lx:%lx\n", addr, size);
 }
 
 static VG_REGPARM(2) void trace_store(Addr addr, SizeT size)
 {
-   if(instr_count > 0) {
-      VG_(printf)("I%x", instr_count);
-      instr_count = 0;
+   const long offset = get_offset(addr);
+   if(offset != -1) {
+      if(instr_count > 0) {
+         VG_(printf)("I%x", instr_count);
+         instr_count = 0;
+      }
+      VG_(printf)("W%lx:%lx\n", offset, size);
    }
-   VG_(printf)("W%lx:%lx\n", addr, size);
 }
 
 static VG_REGPARM(2) void trace_modify(Addr addr, SizeT size)
 {
-   if(instr_count > 0) {
-      VG_(printf)("I%x", instr_count);
-      instr_count = 0;
+   const long offset = get_offset(addr);
+   if(offset != -1) {
+      if(instr_count > 0) {
+         VG_(printf)("I%x", instr_count);
+         instr_count = 0;
+      }
+      VG_(printf)("M%lx:%lx\n", offset, size);
    }
-   VG_(printf)("M%lx:%lx\n", addr, size);
 }
 
-
-static void flushEvents(IRSB* sb)
+static void flushEvents(IRSB *sb)
 {
-   Int        i;
-   Char*      helperName;
-   void*      helperAddr;
-   IRExpr**   argv;
-   IRDirty*   di;
-   Event*     ev;
+   Int i;
 
    for(i = 0; i < events_used; i++) {
-      ev = &events[i];
+
+      Char      *helperName;
+      void      *helperAddr;
+      IRExpr   **argv;
+      IRDirty   *di;
+      Event     *ev = &events[i];
+
       switch (ev->ekind) {
          case Event_Ir:
             helperName = "trace_instr";
@@ -283,7 +407,7 @@ IRSB* trace_instrument(VgCallbackClosure* closure,
          case Ist_Put:
          case Ist_PutI:
          case Ist_MBE:
-            addStmtToIRSB( sbOut, st );
+            addStmtToIRSB(sbOut, st);
             break;
 
          case Ist_IMark:
@@ -372,8 +496,23 @@ static void trace_fini(Int exitcode)
 {
 }
 
+static Bool trace_process_cmd_line_option(Char *arg)
+{
+   if VG_BOOL_CLO(arg, "--all-refs", clo_all_refs) {}
+   else
+      return False;
+   return True;
+}
+
+static void trace_print_usage(void)
+{
+   VG_(printf)(
+"    --all-refs=no|yes     track all memory references [yes]\n"
+   );
+}
+
 static void trace_print_debug_usage(void)
-{  
+{
    VG_(printf)(
 "    (none)\n"
    );
@@ -381,20 +520,35 @@ static void trace_print_debug_usage(void)
 
 static void trace_pre_clo_init(void)
 {
-   VG_(details_name)            ("Trace");
-   VG_(details_version)         (NULL);
-   VG_(details_description)     ("Valgrind tool to generate memory traces");
+   VG_(details_name)("Trace");
+   VG_(details_version)(NULL);
+   VG_(details_description)("Valgrind tool to generate memory traces");
+
    VG_(details_copyright_author)(
       "Copyright (C) 2013, and GNU GPL'd, by Joe Wingbermuehle.");
-   VG_(details_bug_reports_to)  (VG_BUGS_TO);
-   VG_(details_avg_translation_sizeB) ( 200 );
 
-   VG_(basic_tool_funcs)          (trace_post_clo_init,
-                                   trace_instrument,
-                                   trace_fini);
+   VG_(details_bug_reports_to)(VG_BUGS_TO);
+   VG_(details_avg_translation_sizeB)(200);
+
+   VG_(basic_tool_funcs)(trace_post_clo_init, trace_instrument, trace_fini);
+
+   VG_(needs_malloc_replacement)(trace_malloc,
+                                 trace_builtin_new,
+                                 trace_builtin_vec_new,
+                                 trace_memalign,
+                                 trace_calloc,
+                                 trace_free,
+                                 trace_builtin_delete,
+                                 trace_builtin_vec_delete,
+                                 trace_realloc,
+                                 trace_malloc_usable_size,
+                                 16
+   );
+
    VG_(needs_command_line_options)(trace_process_cmd_line_option,
                                    trace_print_usage,
                                    trace_print_debug_usage);
+
 }
 
 VG_DETERMINE_INTERFACE_VERSION(trace_pre_clo_init)
