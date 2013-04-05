@@ -23,7 +23,7 @@ Currently, there is only a single option:
 
 <pre>
 --all-refs=no|yes
-<pre>
+</pre>
 
 This determines whether all data memory accesses are logged ("yes", the
 default) or if only accesses to data that was explicitly allocated by the
