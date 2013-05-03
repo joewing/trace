@@ -494,6 +494,10 @@ IRSB* trace_instrument(VgCallbackClosure* closure,
 
 static void trace_fini(Int exitcode)
 {
+   if(instr_count > 0) {
+      VG_(printf)("I%x", instr_count);
+      instr_count = 0;
+   }
 }
 
 static Bool trace_process_cmd_line_option(Char *arg)
