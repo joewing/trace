@@ -98,6 +98,7 @@ typedef struct AddressRegion {
    appear.  */
 
 static Bool  clo_all_refs = True;
+static Bool  clo_instructions = True;
 static Event events[N_EVENTS];
 static Int   events_used = 0;
 static Int   instr_count = 0;
@@ -229,7 +230,7 @@ static VG_REGPARM(2) void trace_load(Addr addr, SizeT size)
 {
    const long offset = get_offset(addr);
    if(offset != -1) {
-      if(instr_count > 0) {
+      if(clo_instructions && instr_count > 0) {
          VG_(printf)("I%x", instr_count);
          instr_count = 0;
       }
@@ -241,7 +242,7 @@ static VG_REGPARM(2) void trace_store(Addr addr, SizeT size)
 {
    const long offset = get_offset(addr);
    if(offset != -1) {
-      if(instr_count > 0) {
+      if(clo_instructions && instr_count > 0) {
          VG_(printf)("I%x", instr_count);
          instr_count = 0;
       }
@@ -253,7 +254,7 @@ static VG_REGPARM(2) void trace_modify(Addr addr, SizeT size)
 {
    const long offset = get_offset(addr);
    if(offset != -1) {
-      if(instr_count > 0) {
+      if(clo_instructions && instr_count > 0) {
          VG_(printf)("I%x", instr_count);
          instr_count = 0;
       }
@@ -494,7 +495,7 @@ IRSB* trace_instrument(VgCallbackClosure* closure,
 
 static void trace_fini(Int exitcode)
 {
-   if(instr_count > 0) {
+   if(clo_instructions && instr_count > 0) {
       VG_(printf)("I%x", instr_count);
       instr_count = 0;
    }
@@ -502,7 +503,8 @@ static void trace_fini(Int exitcode)
 
 static Bool trace_process_cmd_line_option(Char *arg)
 {
-   if VG_BOOL_CLO(arg, "--all-refs", clo_all_refs) {}
+   if      VG_BOOL_CLO(arg, "--all-refs", clo_all_refs) {}
+   else if VG_BOOL_CLO(arg, "--instructions", clo_instructions) {}
    else
       return False;
    return True;
@@ -512,6 +514,7 @@ static void trace_print_usage(void)
 {
    VG_(printf)(
 "    --all-refs=no|yes     track all memory references [yes]\n"
+"    -instructions=no|yes  track instruction counts [yes]\n"
    );
 }
 
