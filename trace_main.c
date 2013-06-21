@@ -58,12 +58,20 @@ typedef struct {
    Int        size;
 } Event;
 
+/* Region used for tracking memory allocations. */
 typedef struct AddressRegion {
    long offset;
    long start;
    long size;
    struct AddressRegion *next;
 } AddressRegion;
+
+/* Data used to track the total amount of memory referenced. */
+typedef struct AddressRange {
+   long start;
+   long size;
+   struct AddressRange *next;
+} AddressRange;
 
 /* Up to this many unnotified events are allowed.  Must be at least two,
    so that reads and writes to the same address can be merged into a modify.
@@ -99,12 +107,105 @@ typedef struct AddressRegion {
 
 static Bool  clo_all_refs = True;
 static Bool  clo_instructions = True;
+static Bool  clo_references = True;
+static Bool  clo_stats = False;
 static Event events[N_EVENTS];
 static Int   events_used = 0;
 static Int   instr_count = 0;
 
 static AddressRegion *regions = NULL;
+static AddressRange  *ranges  = NULL;
 static long watermark = 0;
+
+static char check_overlap(const AddressRange *ap, const AddressRange *bp)
+{
+   const long a1 = ap->start;
+   const long a2 = ap->start + ap->size;
+   const long b1 = bp->start;
+   const long b2 = bp->start + bp->size;
+
+   if(a1 <= b1 && a2 >= b1) {
+      /* a1 b1 a2 */
+      return 1;
+   }
+   if(b1 <= a1 && b2 >= a1) {
+      /* b1 a1 b2 */
+      return 1;
+   }
+   return 0;
+}
+
+static void combine_ranges(const AddressRange *rp, AddressRange *tp)
+{
+   long end;
+   end = rp->start + rp->size;
+   if(tp->start + tp->size > end) {
+      end = tp->start + tp->size;
+   }
+   if(rp->start < tp->start) {
+      tp->start = rp->start;
+   }
+   tp->size = end - tp->start;
+}
+
+static void add_reference(Addr ptr, SizeT size)
+{
+   const long temp = ptr;
+   AddressRange *rp;
+   AddressRange *tp;
+   char updated;
+
+   /* Check if a range including this address already exists. */
+   for(rp = ranges; rp; rp = rp->next) {
+      if(temp >= rp->start && temp < rp->start + rp->size) {
+         return;
+      }
+   }
+
+   /* Does not already exist; insert a new region. */
+   rp = VG_(malloc)("add_reference", sizeof(AddressRange));
+   rp->next = ranges;
+   ranges = rp;
+   rp->start = temp;
+   rp->size = size;
+
+   /* Coalesce ranges. */
+   do {
+      updated = 0;
+      rp = ranges;
+      if(rp) {
+         for(tp = rp->next; tp; tp = tp->next) {
+            if(check_overlap(tp, rp)) {
+               updated = 1;
+               ranges = ranges->next;
+               combine_ranges(rp, tp);
+               VG_(free)(rp);
+            }
+         }
+      }
+   } while(updated);
+
+}
+
+static long get_total_size(void)
+{
+   long size = 0;
+   AddressRange *rp;
+   for(rp = ranges; rp; rp = rp->next) {
+      size += rp->size;
+   }
+   return size;
+}
+
+static void free_ranges(void)
+{
+   AddressRange *rp;
+   while(ranges) {
+      rp = ranges->next;
+      VG_(free)(ranges);
+      ranges = rp;
+   }
+}
 
 static void add_region(void *ptr, SizeT size)
 {
@@ -234,7 +335,12 @@ static VG_REGPARM(2) void trace_load(Addr addr, SizeT size)
          VG_(printf)("I%x", instr_count);
          instr_count = 0;
       }
-      VG_(printf)("R%lx:%lx\n", offset, size);
+      if(clo_references) {
+         VG_(printf)("R%lx:%lx\n", offset, size);
+      }
+      if(clo_stats) {
+         add_reference(addr, size);
+      }
    }
 }
 
@@ -246,7 +352,12 @@ static VG_REGPARM(2) void trace_store(Addr addr, SizeT size)
          VG_(printf)("I%x", instr_count);
          instr_count = 0;
       }
-      VG_(printf)("W%lx:%lx\n", offset, size);
+      if(clo_references) {
+         VG_(printf)("W%lx:%lx\n", offset, size);
+      }
+      if(clo_stats) {
+         add_reference(addr, size);
+      }
    }
 }
 
@@ -258,7 +369,12 @@ static VG_REGPARM(2) void trace_modify(Addr addr, SizeT size)
          VG_(printf)("I%x", instr_count);
          instr_count = 0;
       }
-      VG_(printf)("M%lx:%lx\n", offset, size);
+      if(clo_references) {
+         VG_(printf)("M%lx:%lx\n", offset, size);
+      }
+      if(clo_stats) {
+         add_reference(addr, size);
+      }
    }
 }
 
@@ -496,8 +612,13 @@ IRSB* trace_instrument(VgCallbackClosure* closure,
 static void trace_fini(Int exitcode)
 {
    if(clo_instructions && instr_count > 0) {
-      VG_(printf)("I%x", instr_count);
+      VG_(printf)("I%x\n", instr_count);
       instr_count = 0;
+   }
+   if(clo_stats) {
+      const long size = get_total_size();
+      VG_(printf)("Total bytes accessed: %ld\n", size);
+      free_ranges();
    }
 }
 
@@ -505,6 +626,8 @@ static Bool trace_process_cmd_line_option(Char *arg)
 {
    if      VG_BOOL_CLO(arg, "--all-refs", clo_all_refs) {}
    else if VG_BOOL_CLO(arg, "--instructions", clo_instructions) {}
+   else if VG_BOOL_CLO(arg, "--access-stats", clo_stats) {}
+   else if VG_BOOL_CLO(arg, "--references", clo_references) {}
    else
       return False;
    return True;
@@ -514,7 +637,9 @@ static void trace_print_usage(void)
 {
    VG_(printf)(
 "    --all-refs=no|yes     track all memory references [yes]\n"
-"    -instructions=no|yes  track instruction counts [yes]\n"
+"    --instructions=no|yes track instruction counts [yes]\n"
+"    --references=no|yes   track references [yes]\n"
+"    --access_stats=yes|no track access stats [no]\n"
    );
 }
 
