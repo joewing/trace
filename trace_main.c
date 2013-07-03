@@ -153,11 +153,21 @@ static void add_reference(Addr ptr, SizeT size)
    const long temp = ptr;
    AddressRange *rp;
    AddressRange *tp;
+   AddressRange **rpp;
    char updated;
 
-   /* Check if a range including this address already exists. */
-   for(rp = ranges; rp; rp = rp->next) {
+   /* Check if a range including this address already exists.
+    * If the range already exists, we bring it to the front of the list.
+    */
+   for(rpp = &ranges; *rpp; rpp = &(*rpp)->next) {
+      rp = *rpp;
       if(temp >= rp->start && temp < rp->start + rp->size) {
+         if(temp + size > rp->start + rp->size) {
+            rp->size = temp + size - rp->start;
+         }
+         *rpp = rp->next;
+         rp->next = ranges;
+         ranges = rp;
          return;
       }
    }
