@@ -342,7 +342,7 @@ static VG_REGPARM(2) void trace_load(Addr addr, SizeT size)
    const long offset = get_offset(addr);
    if(offset != -1) {
       if(clo_instructions && instr_count > 0) {
-         VG_(printf)("I%x", instr_count);
+         VG_(printf)("I%x:0\n", instr_count);
          instr_count = 0;
       }
       if(clo_references) {
@@ -359,7 +359,7 @@ static VG_REGPARM(2) void trace_store(Addr addr, SizeT size)
    const long offset = get_offset(addr);
    if(offset != -1) {
       if(clo_instructions && instr_count > 0) {
-         VG_(printf)("I%x", instr_count);
+         VG_(printf)("I%x:0\n", instr_count);
          instr_count = 0;
       }
       if(clo_references) {
@@ -376,7 +376,7 @@ static VG_REGPARM(2) void trace_modify(Addr addr, SizeT size)
    const long offset = get_offset(addr);
    if(offset != -1) {
       if(clo_instructions && instr_count > 0) {
-         VG_(printf)("I%x", instr_count);
+         VG_(printf)("I%x:0\n", instr_count);
          instr_count = 0;
       }
       if(clo_references) {
@@ -622,7 +622,7 @@ IRSB* trace_instrument(VgCallbackClosure* closure,
 static void trace_fini(Int exitcode)
 {
    if(clo_instructions && instr_count > 0) {
-      VG_(printf)("I%x\n", instr_count);
+      VG_(printf)("I%x:0\n", instr_count);
       instr_count = 0;
    }
    if(clo_stats) {
